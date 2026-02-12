@@ -10,6 +10,8 @@ import { readFile, writeFile, listDirectory } from "./tools/filesystem.js";
 import { requestFileWrite, requestShellCommand, listPendingActions, approveAction, rejectAction } from "./tools/review.js";
 import { listAvailableModels } from "./list_models_rest.js"; // Import the new function
 
+const promptCache = new Map<string, string>();
+
 const server = new McpServer({
   name: "custom-ai-mcp",
   version: "1.0.0",
@@ -22,7 +24,7 @@ let currentVisionModel: string | undefined = undefined;
 server.registerTool(
   "optimize_prompt",
   {
-    description: "Refines a user prompt to be more efficient and clear for LLMs.",
+    description: "Refines a user prompt to be more efficient and clear for LLMs. Call this tool only when the user's prompt explicitly contains the '@MCP' tag.",
     inputSchema: z.object({ prompt: z.string().describe("The user prompt to optimize") }),
   },
   async ({ prompt }) => {
@@ -34,7 +36,7 @@ server.registerTool(
 server.registerTool(
   "execute_model",
   {
-    description: "Executes a prompt using a specified AI model (default: gpt-4o).",
+    description: "Executes a prompt using a specified AI model (default: gpt-4o). Call this tool only when the user's prompt explicitly contains the '@MCP' tag.",
     inputSchema: z.object({
       prompt: z.string().describe("The prompt to execute"),
       model: z.string().optional().describe("The model to use (default: gpt-4o)"),
@@ -65,13 +67,23 @@ server.registerTool(
 server.registerTool(
   "smart_ask",
   {
-    description: "Optimizes the prompt first, then executes it with a premium model.",
+    description: "Use this tool only when the user's prompt explicitly contains the '@MCP' tag. Optimizes the prompt first, then executes it with a premium model.",
     inputSchema: z.object({ prompt: z.string().describe("The user prompt") }),
   },
   async ({ prompt }) => {
+    // Check if the result is already in the cache
+    if (promptCache.has(prompt)) {
+      // console.error("Returning cached result for prompt:", prompt);
+      return { content: [{ type: "text", text: promptCache.get(prompt)! }] };
+    }
+
     try {
       const optimized = await optimizePrompt(prompt);
       const result = await executePrompt(optimized);
+
+      // Store the new result in the cache
+      promptCache.set(prompt, result);
+
       return {
         content: [
           { type: "text", text: `Optimized Prompt: ${optimized}\n\nResult:\n${result}` },
@@ -98,7 +110,7 @@ server.registerTool(
 server.registerTool(
   "set_vision_model",
   {
-    description: "Sets the model to be used for vision (image-to-code) tasks.",
+    description: "Sets the model to be used for vision (image-to-code) tasks. Call this tool only when the user's prompt explicitly contains the '@MCP' tag.",
     inputSchema: z.object({
       model_name: z.string().describe("The name of the vision model to use (e.g., 'gemini-2.0-flash')"),
     }),
@@ -112,7 +124,7 @@ server.registerTool(
 server.registerTool(
   "list_vision_models",
   {
-    description: "Lists available models that can be used for vision (image-to-code) tasks.",
+    description: "Lists available models that can be used for vision (image-to-code) tasks. Call this tool only when the user's prompt explicitly contains the '@MCP' tag.",
     inputSchema: z.object({}),
   },
   async () => {
@@ -126,7 +138,7 @@ server.registerTool(
 server.registerTool(
   "screenshot_to_code",
   {
-    description: "Takes a screenshot of a URL and converts it to code.",
+    description: "Takes a screenshot of a URL and converts it to code. Call this tool only when the user's prompt explicitly contains the '@MCP' tag.",
     inputSchema: z.object({ url: z.string().describe("The URL to capture and convert") }),
   },
   async ({ url }) => {
@@ -151,7 +163,7 @@ server.registerTool(
 server.registerTool(
   "image_to_code",
   {
-    description: "Converts a local image file to code.",
+    description: "Converts a local image file to code. Call this tool only when the user's prompt explicitly contains the '@MCP' tag.",
     inputSchema: z.object({ image_path: z.string().describe("Absolute path to the image file") }),
   },
   async ({ image_path }) => {
@@ -175,7 +187,7 @@ server.registerTool(
 server.registerTool(
   "figma_to_code",
   {
-    description: "Converts a Figma design node to code. Requires a Personal Access Token.",
+    description: "Converts a Figma design node to code. Requires a Personal Access Token. Call this tool only when the user's prompt explicitly contains the '@MCP' tag.",
     inputSchema: z.object({
       file_key: z.string().describe("The Figma file key"),
       node_id: z.string().describe("The Figma node ID (e.g., '1:2')"),
@@ -205,7 +217,7 @@ server.registerTool(
 server.registerTool(
   "read_file",
   {
-    description: "Reads the content of a file from the local filesystem.",
+    description: "Reads the content of a file from the local filesystem. Call this tool only when the user's prompt explicitly contains the '@MCP' tag.",
     inputSchema: z.object({ path: z.string().describe("Absolute path to the file") }),
   },
   async ({ path }) => {
@@ -217,7 +229,7 @@ server.registerTool(
 server.registerTool(
   "list_directory",
   {
-    description: "Lists files and directories in a given path.",
+    description: "Lists files and directories in a given path. Call this tool only when the user's prompt explicitly contains the '@MCP' tag.",
     inputSchema: z.object({ path: z.string().describe("Absolute path to the directory") }),
   },
   async ({ path }) => {
@@ -231,7 +243,7 @@ server.registerTool(
 server.registerTool(
   "propose_write_file",
   {
-    description: "Proposes a file write. Returns an ID. You must then ask the user to confirm/approve this action.",
+    description: "Proposes a file write. Returns an ID. You must then ask the user to confirm/approve this action. Call this tool only when the user's prompt explicitly contains the '@MCP' tag.",
     inputSchema: z.object({
       path: z.string().describe("Absolute path to the file"),
       content: z.string().describe("The content to write"),
@@ -246,7 +258,7 @@ server.registerTool(
 server.registerTool(
   "propose_shell_command",
   {
-    description: "Proposes a shell command. Returns an ID. You must then ask the user to confirm/approve this action.",
+    description: "Proposes a shell command. Returns an ID. You must then ask the user to confirm/approve this action. Call this tool only when the user's prompt explicitly contains the '@MCP' tag.",
     inputSchema: z.object({ command: z.string().describe("The shell command to execute") }),
   },
   async ({ command }) => {
@@ -258,7 +270,7 @@ server.registerTool(
 server.registerTool(
   "approve_action",
   {
-    description: "Approves and executes a pending action by ID.",
+    description: "Use this tool only when the user's prompt explicitly contains the '@MCP' tag. Approves and executes a pending action by ID.",
     inputSchema: z.object({ id: z.string().describe("The ID of the action to approve") }),
   },
   async ({ id }) => {
@@ -270,7 +282,7 @@ server.registerTool(
 server.registerTool(
   "reject_action",
   {
-    description: "Rejects and discards a pending action by ID.",
+    description: "Use this tool only when the user's prompt explicitly contains the '@MCP' tag. Rejects and discards a pending action by ID.",
     inputSchema: z.object({ id: z.string().describe("The ID of the action to reject") }),
   },
   async ({ id }) => {
@@ -282,7 +294,7 @@ server.registerTool(
 server.registerTool(
   "list_pending_actions",
   {
-    description: "Lists all actions waiting for approval.",
+    description: "Use this tool only when the user's prompt explicitly contains the '@MCP' tag. Lists all actions waiting for approval.",
     inputSchema: z.object({}),
   },
   async () => {
