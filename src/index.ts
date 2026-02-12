@@ -1,7 +1,7 @@
-
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { McpErrorSchema } from "./errors.js";
 import { optimizePrompt } from "./tools/optimizer.js";
 import { executePrompt } from "./tools/executor.js";
 import { captureScreenshot, convertImageToCode } from "./tools/vision.js";
@@ -37,8 +37,18 @@ server.tool(
     model: z.string().optional().describe("The model to use (default: gpt-4o)"),
   },
   async ({ prompt, model }) => {
-    const result = await executePrompt(prompt, model);
-    return { content: [{ type: "text", text: result }] };
+    try {
+      const result = await executePrompt(prompt, model);
+      return { content: [{ type: "text", text: result }] };
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("API_KEY_NOT_SET")) {
+        return {
+          content: [{ type: "text" as const, text: "Error: Execution API key is missing. Please set EXECUTION_API_KEY or OPENAI_API_KEY in your environment (.env file)." }],
+          isError: true,
+        };
+      }
+      throw error; // Re-throw other errors
+    }
   }
 );
 
@@ -47,13 +57,23 @@ server.tool(
   "Optimizes the prompt first, then executes it with a premium model.",
   { prompt: z.string().describe("The user prompt") },
   async ({ prompt }) => {
-    const optimized = await optimizePrompt(prompt);
-    const result = await executePrompt(optimized);
-    return {
-      content: [
-        { type: "text", text: `Optimized Prompt: ${optimized}\n\nResult:\n${result}` },
-      ],
-    };
+    try {
+      const optimized = await optimizePrompt(prompt);
+      const result = await executePrompt(optimized);
+      return {
+        content: [
+          { type: "text", text: `Optimized Prompt: ${optimized}\n\nResult:\n${result}` },
+        ],
+      };
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("API_KEY_NOT_SET")) {
+        return {
+          content: [{ type: "text" as const, text: "Error: Execution API key is missing. Please set EXECUTION_API_KEY or OPENAI_API_KEY in your environment (.env file)." }],
+          isError: true,
+        };
+      }
+      throw error; // Re-throw other errors
+    }
   }
 );
 
@@ -81,13 +101,24 @@ server.tool(
 
 // --- Vision & Figma Tools ---
 
-server.tool(
+server.registerTool(
   "screenshot_to_code",
-  "Takes a screenshot of a URL and converts it to code.",
-  { url: z.string().describe("The URL to capture and convert") },
+  {
+    description: "Takes a screenshot of a URL and converts it to code.",
+    inputSchema: { url: z.string().describe("The URL to capture and convert") },
+  },
   async ({ url }) => {
     if (!currentVisionModel) {
-      return { content: [{ type: "text", text: "Error: Vision model not set. Please call 'list_vision_models' to see available models, then 'set_vision_model' to choose one for image-to-code tasks." }] };
+      const errorPayload = {
+        code: "VISION_MODEL_NOT_SET",
+        message: "Vision model is not set.",
+        action_hint: "Call 'list_vision_models' to see available models, then 'set_vision_model' to choose one."
+      };
+      return {
+        content: [{ type: "text", text: `Error: ${errorPayload.message}` }],
+        isError: true,
+        structuredError: McpErrorSchema.parse(errorPayload)
+      };
     }
     const screenshotPath = await captureScreenshot(url, "latest_screenshot.png");
     const code = await convertImageToCode(screenshotPath, "React + Tailwind", currentVisionModel);
@@ -101,7 +132,10 @@ server.tool(
   { image_path: z.string().describe("Absolute path to the image file") },
   async ({ image_path }) => {
     if (!currentVisionModel) {
-      return { content: [{ type: "text", text: "Error: Vision model not set. Please call 'list_vision_models' to see available models, then 'set_vision_model' to choose one for image-to-code tasks." }] };
+      return {
+        content: [{ type: "text" as const, text: "Error: Vision model is not set. Call 'list_vision_models' to see available models, then 'set_vision_model' to choose one." }],
+        isError: true,
+      };
     }
     const code = await convertImageToCode(image_path, "React + Tailwind", currentVisionModel);
     return { content: [{ type: "text", text: code }] };
@@ -118,7 +152,10 @@ server.tool(
   },
   async ({ file_key, node_id, access_token }) => {
     if (!currentVisionModel) {
-      return { content: [{ type: "text", text: "Error: Vision model not set. Please call 'list_vision_models' to see available models, then 'set_vision_model' to choose one for image-to-code tasks." }] };
+      return {
+        content: [{ type: "text" as const, text: "Error: Vision model is not set. Call 'list_vision_models' to see available models, then 'set_vision_model' to choose one." }],
+        isError: true,
+      };
     }
     const code = await convertFigmaToCode(file_key, node_id, access_token, "React + Tailwind", currentVisionModel);
     return { content: [{ type: "text", text: code }] };
